@@ -61,6 +61,41 @@ Azure Function 수신 → 응답까지
 
 ---
 
+## 슬라이드 5-1: HTTP Handler 다음에 누가 받나? (전체 흐름 한눈에)
+
+**질문**: Azure Functions → HTTP Handler 다음에 **누가** 받나?
+
+**답**: **유스케이스 (MultiDocumentAnalysisUseCase)** 가 받습니다.  
+HTTP Handler가 `use_case.execute(input_dto)` 를 호출하면, 그때부터는 **유스케이스**가 흐름을 이어갑니다.
+
+**전체 순서 (PPT용)**
+
+```
+1. Azure Functions        → POST /api/messages 수신
+2. HTTP Handler          → 파싱·URL 추출·검증 후 use_case.execute() 호출
+3. 유스케이스             → 여기서부터 유스케이스가 처리
+   ├─ 메타데이터 조회      → GitHub API로 owner/name만 (Blob 이름용)
+   ├─ 문서 생성 요청      → ai_analyzer.run_from_url(github_url) 호출
+   │     │
+   │     └─ AiAgentPipelineAdapter (문서 생성 담당)
+   │           ├─ 레포 준비  → prepare_repo(URL): GitHub **zip 다운로드** (git clone 아님) → 로컬 경로
+   │           ├─ 5개 에이전트 순차 실행 → 5개 문서 내용 수집
+   │           └─ doc_data 반환
+   │
+   ├─ 5개 문서 → ZIP 패키징
+   ├─ ZIP → Blob Storage 업로드 (SAS URL 발급)
+   └─ 결과(URL, 요약 등) 반환
+4. HTTP Handler          → 반환된 결과로 Adaptive Card 만들고 HTTP 200 응답
+```
+
+**정리**
+
+- **HTTP Handler 다음** = **유스케이스**가 받아서, 메타 조회 → **문서 생성(ai_analyzer)** → ZIP → Blob 까지 한 번에 수행.
+- **레포 가져오기** = **git clone이 아니라** GitHub **zip 다운로드** 후 압축 해제 (`prepare_repo`). 그 로컬 경로를 5개 에이전트가 사용합니다.
+- **문서 생성** = 유스케이스가 **AiAgentPipelineAdapter.run_from_url()** 한 번 호출하고, 그 안에서 prepare_repo → 5 에이전트 → 5개 문서 dict 반환.
+
+---
+
 ## 슬라이드 6: 유스케이스 ① 메타 & 문서 생성
 
 **5. 유스케이스 내부 (1) — 메타데이터 & 문서 생성**
@@ -82,7 +117,7 @@ Azure Function 수신 → 응답까지
 *(슬라이드 6의 "문서 생성" 단계가 호출하는 흐름)*
 
 - **레포 준비**: `prepare_repo(github_url)`  
-  → **레포 clone/다운로드가 여기서 일어남.** GitHub zip 다운로드 또는 로컬 경로 → `repo_path` 확보
+  → **git clone이 아니라 GitHub zip 다운로드** 후 압축 해제. (또는 로컬 경로면 그대로 사용) → `repo_path` 확보
 - **5개 에이전트 순차 실행** (각자 스캐너로 관련 파일만 추출 후 LLM/작성기 사용)
   - ERD → database.dbml, erd_summary.md
   - API → api_spec.md
@@ -93,6 +128,22 @@ Azure Function 수신 → 응답까지
 
 ---
 
+## 슬라이드 7-1: Scanner / Extractor / Writer 정의 (PPT용 한 줄)
+
+| 단계 | 정의 (PPT에 그대로 쓸 문장) |
+|------|-----------------------------|
+| **Scanner** | 레포에서 **이 에이전트에 해당하는 파일만** 추출한다. 어노테이션(`@Entity`, `@RestController` 등) 또는 파일명 패턴(`*Controller.java`, `pom.xml` 등)으로 필터링해 **대상 파일 목록**을 만든다. |
+| **Extractor** | Scanner가 고른 파일 내용을 **청크(글자 수 제한) 단위로 나눈 뒤**, 프롬프트와 함께 **Azure OpenAI에 분석 요청**을 보낸다. 청크별로 받은 JSON을 **병합**해 하나의 **구조화 데이터**(API 스펙, 스키마, 아키텍처 등)로 만든다. |
+| **Writer** | Extractor가 반환한 **구조화 데이터(JSON/모델)**를 받아 **최종 문서 파일**로 변환·저장한다. Markdown(`.md`), DBML, SQL 등 형식으로 디스크에 쓴다. |
+
+**짧게 쓸 때 (불릿용)**
+
+- **Scanner** = 레포에서 관련 파일만 추출 (어노테이션·파일명 패턴)
+- **Extractor** = 프롬프트 + 파일(청크)로 Azure OpenAI 분석 요청 → 구조화 데이터(JSON) 수집·병합
+- **Writer** = 구조화 데이터 → 문서 파일(MD/DBML/SQL) 생성·저장
+
+---
+
 ## 슬라이드 7-2: 각 에이전트 공통 흐름 (스캐너 → 추출기 → 작성기)
 
 **에이전트 하나당 흐름**
@@ -100,13 +151,13 @@ Azure Function 수신 → 응답까지
 ```
   [로컬 레포]
        │
-       ▼  Scanner: 어노테이션/파일명으로 "볼 파일만" 추림
+       ▼  Scanner: 어노테이션/파일명으로 "볼 파일만" 추림 → List[Path]
   List[Path]
        │
-       ▼  Extractor: 선택된 파일 내용 → LLM(또는 파서) 분석
+       ▼  Extractor: 파일 내용(청크) + 프롬프트 → Azure OpenAI → JSON 병합
   구조화 데이터 (JSON/모델)
        │
-       ▼  Writer: Markdown / DBML / SQL 등 파일로 출력
+       ▼  Writer: JSON/모델 → Markdown·DBML·SQL 등 문서 파일로 저장
   [문서 파일]
 ```
 

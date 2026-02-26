@@ -31,6 +31,58 @@
 
 ---
 
+## Extractor의 청크 처리 (토큰/길이 제한 대응)
+
+LLM에 넘기는 파일 내용이 너무 길면 컨텍스트 한도를 넘을 수 있어, Extractor에서 **글자 수 기준**으로 나누거나 잘라서 처리합니다.
+
+### 방식 A: 청크로 나눠 여러 번 LLM 호출 후 병합
+
+- **대상**: API Agent, ERD Agent(jpa_ai_extractor), DDL Agent
+- **로직**:
+  1. `_chunk_files(file_texts, max_chars=120_000)` — 파일 리스트를 **누적 글자 수 120,000자** 단위로 청크 분할 (파일 단위로 쪼갬, 파일이 120k 넘으면 한 청크에 한 파일만 들어갈 수 있음).
+  2. 각 청크마다 `_make_files_blob(chunk)` → `<file path="...">\n내용\n</file>` 형태 문자열 생성 후 **LLM 1회 호출**.
+  3. 청크별로 나온 JSON(ExtractedApiSpec / ExtractedSchema / ExtractedDDL)을 **merge** (컨트롤러/테이블 등 키 기준으로 중복 제거·합침).
+- **효과**: 파일이 아주 많아도 120k자씩 나눠 보내므로 컨텍스트 초과를 피하고, 결과만 병합해 한 문서로 만듦.
+
+```
+  file_texts (많을 수 있음)
+       │
+       ▼  _chunk_files(max_chars=120_000)
+  [ chunk1, chunk2, ... ]   (각 청크 = (Path, content) 리스트, 누적 길이 ≤ 120k)
+       │
+       ├─► _make_files_blob(chunk1) ──► LLM ──► JSON1
+       ├─► _make_files_blob(chunk2) ──► LLM ──► JSON2
+       └─► ...
+       │
+       ▼  _merge_specs / _merge_extracted / _merge_ddls
+  단일 Extracted* (최종 결과)
+```
+
+### 방식 B: 한 번에 보내되 길이 제한으로 잘라냄
+
+- **대상**: Arch Agent, Stack Agent
+- **로직**: `_make_files_blob(files, max_chars=100_000)` — 파일을 **순서대로** 붙이되, **누적 글자 수가 100,000자를 넘으면 그 이후 파일은 넣지 않고 break**. LLM 호출은 **1회**.
+- **효과**: 설정/빌드 파일 위주라 보통 100k 안에 들어와서, 청크 분할·병합 없이 한 번에 처리.
+
+```
+  file_texts
+       │
+       ▼  _make_files_blob(max_chars=100_000)  →  넘치면 그 전까지만 포함
+  files_blob (한 덩어리)
+       │
+       ▼  LLM 1회 호출
+  ExtractedArchitecture / ExtractedStack
+```
+
+### 요약
+
+| 에이전트 | 방식 | max_chars | 병합 |
+|----------|------|-----------|------|
+| API, ERD, DDL | 청크 분할 → 청크당 LLM 호출 | 120_000 | ✅ _merge_* |
+| Arch, Stack | 한 번에 전달(앞에서부터 잘람) | 100_000 | 없음 |
+
+---
+
 ## 1. API Agent (api_spec.md)
 
 **역할**: REST API 스펙 문서 생성.
@@ -57,6 +109,7 @@
 ### Extractor — 어떻게 분석하는가
 
 - **입력**: `(Path, content)` 리스트 (스캐너가 고른 Controller 파일들)
+- **청크**: `_chunk_files(max_chars=120_000)` 로 파일 목록을 120k자 단위로 나눈 뒤, **청크마다 LLM 1회 호출** → `_merge_specs()` 로 컨트롤러/엔드포인트 병합.
 - **방식**: Azure OpenAI LLM 호출. 프롬프트에 위 파일 내용을 `<file path="...">` 형태로 넣음.
 - **규칙**: `@RequestMapping` → base path, `@GetMapping`/`@PostMapping` 등 → method+path, `@PathVariable`/`@RequestParam`/`@RequestBody` → 파라미터/요청체, 반환 타입/`ResponseEntity` → 응답
 - **출력**: JSON → `ExtractedApiSpec` (controllers[].endpoints[])
@@ -121,8 +174,8 @@
 
 ### Extractor — 어떻게 분석하는가
 
-- **ai_first=True**: 위에서 모은 **전체 파일**을 LLM(`ai_extract_schema`)에 넘겨서 JSON 스키마 추출 → `Schema` (tables, refs, enums)
-- **ai_first=False**: **JPA 파서**(`JPAJavaParser`)로 엔티티 파일만 파싱 → `Schema` 구성. 옵션으로 `refine_schema_with_aoai` 호출 가능
+- **ai_first=True**: 위에서 모은 **전체 파일**을 LLM(`ai_extract_schema`)에 넘김. **청크**: `_chunk_files(max_chars=120_000)` 로 나눈 뒤 **청크마다 LLM 호출** → `_merge_extracted()` 로 스키마 병합 → `Schema` (tables, refs, enums).
+- **ai_first=False**: **JPA 파서**(`JPAJavaParser`)로 엔티티 파일만 파싱 → `Schema` 구성. 옵션으로 `refine_schema_with_aoai` 호출 가능 (청크 없음).
 - **규칙**: `@Entity`→테이블, `@Table(name)`→테이블명, `@Id`/`@Column`→컬럼, `@ManyToOne`/`@JoinColumn`→FK, `@ManyToMany`/`@JoinTable`→조인 테이블, `@EmbeddedId`→@Embeddable 필드 전개
 
 ```
@@ -176,6 +229,7 @@
 ### Extractor — 어떻게 분석하는가
 
 - **입력**: `(arch_files 내용)` + `dir_tree`
+- **청크**: 여러 번 나누지 않음. `_make_files_blob(file_texts, max_chars=100_000)` 로 **앞에서부터 100k자까지만** 포함해 한 번에 LLM에 전달 (넘치는 파일은 생략).
 - **방식**: LLM 한 번 호출. 디렉터리 구조 + 선택된 파일 내용을 주고, 아키텍처 스타일·레이어·의존성·외부 시스템·Mermaid flowchart JSON 요청
 - **출력**: `ExtractedArchitecture` (architecture_style, layers, dependencies, external_systems, mermaid_diagram)
 
@@ -223,7 +277,8 @@
 ### Extractor — 어떻게 분석하는가
 
 - **입력**: 위에서 모은 전체 파일 내용
-- **방식**: LLM(`ai_extract_ddl`) 한 번 호출. JPA 규칙(@Entity→CREATE TABLE, @Column→컬럼, @ManyToOne→FK 등) 주고 JSON DDL 스키마 요청
+- **청크**: `_chunk_files(max_chars=120_000)` 로 120k자 단위로 나눈 뒤 **청크마다 LLM 1회 호출** → `_merge_ddls()` 로 테이블 병합.
+- **방식**: LLM(`ai_extract_ddl`) 호출. JPA 규칙(@Entity→CREATE TABLE, @Column→컬럼, @ManyToOne→FK 등) 주고 JSON DDL 스키마 요청
 - **출력**: `ExtractedDDL` (dialect, tables[].columns, constraints 등)
 
 ```
@@ -272,6 +327,7 @@
 ### Extractor — 어떻게 분석하는가
 
 - **입력**: 스캐너가 고른 파일들의 내용
+- **청크**: 여러 번 나누지 않음. `_make_files_blob(files, max_chars=100_000)` 로 **앞에서부터 100k자까지만** 포함해 한 번에 LLM에 전달.
 - **방식**: LLM 한 번 호출. 언어/버전, 프레임워크, 빌드 도구, 의존성 카테고리별 목록(이름·버전·scope·설명) JSON 요청
 - **출력**: `ExtractedStack` (language, framework, build_tool, categories[])
 
