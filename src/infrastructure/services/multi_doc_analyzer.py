@@ -76,6 +76,22 @@ class MultiDocumentAnalyzer:
             azure_endpoint=api_endpoint,
             azure_deployment=deployment_name,
         )
+        # Debug log the configuration
+        logger.info(f"AzureOpenAI init: endpoint={api_endpoint}, deployment={deployment_name}, version={api_version}")
+        
+        # Ensure endpoint has correct format
+        # Azure OpenAI endpoint should be: https://<resource>.openai.azure.com/
+        # NOT include /openai/ or /deployments/ in the base URL
+        normalized_endpoint = api_endpoint.strip().rstrip('/')
+        if not normalized_endpoint.endswith('.openai.azure.com'):
+            logger.warning(f"Endpoint may be incorrect: {normalized_endpoint}")
+        
+        self._client = AzureOpenAI(
+            api_key=api_key,
+            api_version=api_version,
+            azure_endpoint=normalized_endpoint,
+            azure_deployment=deployment_name,
+        )
         self._deployment_name = deployment_name
     
     def analyze(self, analysis: RepositoryAnalysis) -> dict[str, Any]:

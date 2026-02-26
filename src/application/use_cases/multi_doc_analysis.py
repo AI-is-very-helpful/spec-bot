@@ -3,7 +3,6 @@
 import logging
 from dataclasses import dataclass
 from typing import Any
-from dataclasses import dataclass
 
 from src.application.dto.multidoc import (
     MultiDocumentAnalysisInput,
@@ -76,24 +75,26 @@ class MultiDocumentAnalysisUseCase:
         )
         
         # Step 6: AI analysis (generates 7 documents)
-        # For now, use the multi-doc analyzer interface
-        if hasattr(self.ai_analyzer, 'analyze_multidoc'):
-            doc_data = self.ai_analyzer.analyze_multidoc(analysis)
-        else:
-            # Fallback: use existing analyze method and transform
-            result_json = self.ai_analyzer.analyze(analysis)
+        # analyze() returns a dict
+        doc_data = self.ai_analyzer.analyze(analysis)
+        
+        # If result is already a dict, use it directly
+        # Otherwise parse as JSON string
+        if not isinstance(doc_data, dict):
             import json
-            doc_data = json.loads(result_json)
-            # Transform to new format
+            doc_data = json.loads(doc_data)
+        
+        # Ensure all required keys exist
+        if "api_spec" not in doc_data:
             doc_data = {
                 "project_summary": doc_data.get("project_summary", {}),
                 "api_spec": doc_data.get("api_spec", ""),
-                "erd": f"# ERD\n\n{doc_data.get('erd_code', '')}",
-                "sequence": f"# Sequence\n\n{doc_data.get('sequence_code', '')}",
-                "architecture": "# Architecture\n\n(TBD)",
-                "dependencies": "# Dependencies\n\n(TBD)",
-                "structure": "# Structure\n\n(TBD)",
-                "state_machine": "# State Machine\n\n(TBD)",
+                "erd": doc_data.get("erd", ""),
+                "sequence": doc_data.get("sequence", ""),
+                "architecture": doc_data.get("architecture", ""),
+                "dependencies": doc_data.get("dependencies", ""),
+                "structure": doc_data.get("structure", ""),
+                "state_machine": doc_data.get("state_machine", ""),
             }
         
         # Step 7: Create document dictionary

@@ -146,6 +146,88 @@ AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=your_
 func start
 ```
 
+### 1. 의존성 설치
+
+```bash
+# 시스템 Python에 의존성 설치 (Azure Functions용)
+pip install --break-system-packages -r requirements.txt
+```
+
+### 2. 환경 변수 설정
+
+`.env.example`을 `.env`로 복사하고 편집:
+
+```bash
+# Azure Bot Configuration
+AZURE_BOT_ID=test_bot_id
+AZURE_BOT_PASSWORD=test_bot_password
+
+# Azure OpenAI Configuration
+OPENAI_API_KEY=your_azure_openai_api_key
+OPENAI_API_ENDPOINT=https://your-resource.openai.azure.com/
+OPENAI_API_VERSION=2024-02-15-preview
+OPENAI_DEPLOYMENT_NAME=kimi-k2.5
+
+# Azure Blob Storage
+AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=your_account;AccountKey=your_key==
+
+# GitHub (필수 - rate limit 방지)
+GITHUB_TOKEN=your_github_pat
+```
+
+### 3. 서버 실행
+
+```bash
+# 스크립트 사용 (권장)
+./run.sh
+
+# 또는 직접 실행
+func start
+```
+
+서버 실행 완료 후:
+```
+Functions:
+    messages: [POST] http://localhost:7071/api/messages
+```
+
+### 4. 테스트 요청
+
+다른 터미널에서:
+
+```bash
+curl -X POST http://localhost:7071/api/messages \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "message",
+    "text": "@Spec Bot https://github.com/AI-is-very-helpful/hae_shopping_mall",
+    "from": {"id": "test-user", "name": "Test User"},
+    "conversation": {"id": "test-conversation"}
+  }'
+```
+
+### 5. 예상 응답
+
+성공 시:
+- ACK 메시지 ("분석 시작...")
+- 분석 완료 후 Adaptive Card (ZIP 다운로드 링크 포함)
+
+### 6. 로그 확인
+
+서버 로그에서 확인:
+- `Spec Bot function triggered` - 요청 수신
+- `Processing repository` - GitHub URL 추출
+- `Executing multi-document analysis use case` - 분석 시작
+- `Analysis completed` - 분석 완료
+
+### 7.常见 문제
+
+| 문제 | 해결 방법 |
+|------|----------|
+| `403 rate limit exceeded` | `.env`에 `GITHUB_TOKEN` 추가 |
+| `404 Resource Not Found` | Azure OpenAI endpoint/deployment 확인 |
+| `ModuleNotFoundError` | `pip install --break-system-packages -r requirements.txt` |
+
 ## 테스트 실행 (TDD)
 
 ```bash
