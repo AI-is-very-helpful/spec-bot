@@ -2,12 +2,10 @@
 
 import json
 import logging
-from typing import Optional
-
-from openai import AzureOpenAI
 
 from src.domain.entities.repository import RepositoryAnalysis
 from src.domain.interfaces.repositories import AIAnalyzer
+from src.infrastructure.services.aoai_client import build_aoai_client
 
 logger = logging.getLogger(__name__)
 
@@ -53,22 +51,21 @@ Return a JSON object with this structure:
 
 
 class AzureOpenAIService(AIAnalyzer):
-    """Azure OpenAI implementation of AIAnalyzer"""
-    
+    """Azure OpenAI implementation of AIAnalyzer (엔드포인트 형태에 따라 OpenAI/AzureOpenAI 사용)"""
+
     def __init__(
         self,
+        endpoint: str,
         api_key: str,
-        api_endpoint: str,
         api_version: str,
-        deployment_name: str,
+        deployment: str,
     ) -> None:
-        self._client = AzureOpenAI(
+        self._client, self._deployment_name = build_aoai_client(
+            endpoint=endpoint,
             api_key=api_key,
             api_version=api_version,
-            azure_endpoint=api_endpoint,
-            azure_deployment=deployment_name,
+            deployment=deployment,
         )
-        self._deployment_name = deployment_name
     
     def analyze(self, analysis: RepositoryAnalysis) -> str:
         logger.info(

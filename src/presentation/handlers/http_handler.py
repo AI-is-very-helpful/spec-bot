@@ -4,15 +4,10 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Optional
 
-# Load environment variables from .env file
 from dotenv import load_dotenv
-
-# Load .env file if it exists
-_env_path = Path(__file__).parent.parent.parent.parent / ".env"
+_env_path = Path(__file__).resolve().parent.parent.parent.parent / ".env"
 load_dotenv(_env_path)
-from typing import Optional
 
 import azure.functions as func
 from pydantic import ValidationError
@@ -22,15 +17,11 @@ from src.application.use_cases.multi_doc_analysis import MultiDocumentAnalysisUs
 from src.domain.interfaces.repositories import (
     AIAnalyzer,
     CardBuilder,
-    DiagramRenderer,
     GitHubRepository,
 )
 from src.infrastructure.services.blob_storage import AzureBlobStorageService
 from src.infrastructure.services.card import TeamsCardBuilder
 from src.infrastructure.services.logging_config import get_logger
-from src.infrastructure.services.mermaid import MermaidInkRenderer
-from src.infrastructure.services.multi_doc_analyzer import MultiDocumentAnalyzer
-from src.infrastructure.services.openai import AzureOpenAIService
 from src.infrastructure.services.teams_bot import TeamsBotService, MessageFactory
 from src.infrastructure.services.zip_packager import ZIPPackagingService
 
@@ -48,13 +39,9 @@ def get_github_repository() -> GitHubRepository:
 
 
 def get_ai_analyzer() -> AIAnalyzer:
-    """Get AI analyzer instance (MultiDocumentAnalyzer for 7 documents)"""
-    return MultiDocumentAnalyzer(
-        api_key=os.getenv("OPENAI_API_KEY", ""),
-        api_endpoint=os.getenv("OPENAI_API_ENDPOINT", ""),
-        api_version=os.getenv("OPENAI_API_VERSION", "2024-02-15-preview"),
-        deployment_name=os.getenv("OPENAI_DEPLOYMENT_NAME", "kimi-k2.5"),
-    )
+    """Get AI analyzer: ai-agent 파이프라인(AiAgentPipelineAdapter)만 사용."""
+    from src.infrastructure.services.ai_agent_pipeline import AiAgentPipelineAdapter
+    return AiAgentPipelineAdapter()
 
 
 def get_zip_packager() -> ZIPPackagingService:

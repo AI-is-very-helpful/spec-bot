@@ -24,6 +24,10 @@ PyGithub
 # Logging
 python-json-logger
 
+# agents (erd/api/arch/ddl/stack) — USE_AI_AGENT 시
+javalang
+rich
+
 # Testing
 pytest
 pytest-mock

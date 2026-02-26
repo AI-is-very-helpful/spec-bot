@@ -21,21 +21,19 @@ from src.domain.value_objects import GitHubURL
 logger = logging.getLogger(__name__)
 
 
-# Document file names
+# 5개 에이전트 산출물 파일명
 DOCUMENT_FILES = [
     "api_spec.md",
     "erd.md",
-    "sequence.md",
     "architecture.md",
-    "dependencies.md",
-    "structure.md",
-    "state_machine.md",
+    "tech_stack.md",
+    "schema.sql",
 ]
 
 
 @dataclass
 class MultiDocumentAnalysisUseCase:
-    """Use case for analyzing repository and generating 7 documents"""
+    """Use case for analyzing repository and generating 5 documents (5 agents)"""
     
     github_repository: GitHubRepository
     ai_analyzer: AIAnalyzer
@@ -48,7 +46,7 @@ class MultiDocumentAnalysisUseCase:
         
         Steps:
         1. Fetch repository data
-        2. Generate 7 documents via AI
+        2. Generate 5 documents via 5 agents
         3. Package documents into ZIP
         4. Upload to Blob Storage
         5. Generate SAS URL
@@ -57,54 +55,20 @@ class MultiDocumentAnalysisUseCase:
         # Step 1: Parse and validate URL
         logger.info(f"Starting multi-document analysis: {input_dto.github_url}")
         github_url = GitHubURL(value=input_dto.github_url)
-        
-        # Step 2: Fetch repository metadata
+
+        # Step 2: Fetch repository metadata (blob 이름 등에 사용)
         metadata = self.github_repository.fetch_metadata(github_url)
+
+        # Step 3: 문서 생성 — ai-agent 파이프라인만 사용
+        doc_data = self.ai_analyzer.run_from_url(github_url.value)
         
-        # Step 3: Fetch file tree
-        file_tree = self.github_repository.fetch_file_tree(github_url)
-        
-        # Step 4: Fetch key source files
-        source_files = self.github_repository.fetch_source_files(github_url)
-        
-        # Step 5: Build repository analysis entity
-        analysis = RepositoryAnalysis(
-            url=github_url,
-            metadata=metadata,
-            source_files=source_files,
-            file_tree=file_tree,
-        )
-        
-        # Step 6: AI analysis (generates 7 documents)
-        # For now, use the multi-doc analyzer interface
-        if hasattr(self.ai_analyzer, 'analyze_multidoc'):
-            doc_data = self.ai_analyzer.analyze_multidoc(analysis)
-        else:
-            # Fallback: use existing analyze method and transform
-            result_json = self.ai_analyzer.analyze(analysis)
-            import json
-            doc_data = json.loads(result_json)
-            # Transform to new format
-            doc_data = {
-                "project_summary": doc_data.get("project_summary", {}),
-                "api_spec": doc_data.get("api_spec", ""),
-                "erd": f"# ERD\n\n{doc_data.get('erd_code', '')}",
-                "sequence": f"# Sequence\n\n{doc_data.get('sequence_code', '')}",
-                "architecture": "# Architecture\n\n(TBD)",
-                "dependencies": "# Dependencies\n\n(TBD)",
-                "structure": "# Structure\n\n(TBD)",
-                "state_machine": "# State Machine\n\n(TBD)",
-            }
-        
-        # Step 7: Create document dictionary
+        # Step 7: Create document dictionary (5개 에이전트 결과만)
         documents = {
             "api_spec.md": doc_data.get("api_spec", ""),
             "erd.md": doc_data.get("erd", ""),
-            "sequence.md": doc_data.get("sequence", ""),
             "architecture.md": doc_data.get("architecture", ""),
-            "dependencies.md": doc_data.get("dependencies", ""),
-            "structure.md": doc_data.get("structure", ""),
-            "state_machine.md": doc_data.get("state_machine", ""),
+            "tech_stack.md": doc_data.get("tech_stack", ""),
+            "schema.sql": doc_data.get("schema_sql", ""),
         }
         
         # Step 8: Create ZIP package
@@ -120,6 +84,6 @@ class MultiDocumentAnalysisUseCase:
         return MultiDocumentAnalysisOutput(
             zip_blob_url=upload_result.full_url,
             summary=doc_data.get("project_summary", {}),
-            document_count=7,
+            document_count=5,
             expires_in_seconds=upload_result.expires_in_seconds,
         )

@@ -32,7 +32,7 @@ class TestMultiDocumentAnalysisOutput:
     """Test cases for MultiDocumentAnalysisOutput DTO"""
     
     def test_valid_output(self) -> None:
-        """Test valid output with all 7 documents"""
+        """Test valid output with 5 documents"""
         dto = MultiDocumentAnalysisOutput(
             zip_blob_url="https://storage.blob.core.windows.net/container/doc.zip?sv=2021-06",
             summary={
@@ -41,12 +41,12 @@ class TestMultiDocumentAnalysisOutput:
                 "tech_stack": ["Python", "FastAPI"],
                 "architecture": "MVC"
             },
-            document_count=7,
+            document_count=5,
             expires_in_seconds=86400
         )
         
         assert dto.zip_blob_url.startswith("https://")
-        assert dto.document_count == 7
+        assert dto.document_count == 5
         assert dto.expires_in_seconds == 86400  # 24 hours
     
     def test_output_default_expiry(self) -> None:
@@ -54,7 +54,7 @@ class TestMultiDocumentAnalysisOutput:
         dto = MultiDocumentAnalysisOutput(
             zip_blob_url="https://example.com/blob",
             summary={"name": "Test"},
-            document_count=7
+            document_count=5
         )
         assert dto.expires_in_seconds == 86400
 
@@ -63,47 +63,39 @@ class TestDocumentPackage:
     """Test cases for DocumentPackage DTO"""
     
     def test_valid_package(self) -> None:
-        """Test valid document package"""
+        """Test valid document package (5 docs)"""
         dto = DocumentPackage(
             api_spec="# API Spec",
             erd="# ERD",
-            sequence="# Sequence",
             architecture="# Architecture",
-            dependencies="# Dependencies",
-            structure="# Structure",
-            state_machine="# State Machine"
+            tech_stack="# Tech Stack",
+            schema_sql="-- DDL"
         )
         
         assert dto.api_spec == "# API Spec"
         assert dto.erd == "# ERD"
-        assert dto.sequence == "# Sequence"
         assert dto.architecture == "# Architecture"
-        assert dto.dependencies == "# Dependencies"
-        assert dto.structure == "# Structure"
-        assert dto.state_machine == "# State Machine"
-        assert len(dto) == 7
-    
+        assert dto.tech_stack == "# Tech Stack"
+        assert dto.schema_sql == "-- DDL"
+        assert len(dto) == 5
+
     def test_package_keys(self) -> None:
         """Test document package has correct keys"""
         package = DocumentPackage(
             api_spec="",
             erd="",
-            sequence="",
             architecture="",
-            dependencies="",
-            structure="",
-            state_machine=""
+            tech_stack="",
+            schema_sql=""
         )
         
         keys = list(package.keys())
         expected = [
             "api_spec.md",
             "erd.md",
-            "sequence.md",
             "architecture.md",
-            "dependencies.md",
-            "structure.md",
-            "state_machine.md"
+            "tech_stack.md",
+            "schema.sql",
         ]
         
         assert keys == expected

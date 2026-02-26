@@ -21,48 +21,41 @@ class MultiDocumentAnalysisInput(BaseModel):
 
 
 class DocumentPackage(BaseModel):
-    """Package containing all 7 generated documents"""
+    """Package containing 5 generated documents (5 agents)"""
     api_spec: str = Field(default="", description="API Specification in Markdown")
-    erd: str = Field(default="", description="ERD with Mermaid erDiagram")
-    sequence: str = Field(default="", description="Sequence Diagram with Mermaid")
-    architecture: str = Field(default="", description="Architecture Diagram with Mermaid flowchart")
-    dependencies: str = Field(default="", description="Setup & Dependencies document")
-    structure: str = Field(default="", description="Annotated Project Structure")
-    state_machine: str = Field(default="", description="State Machine Diagram with Mermaid stateDiagram")
-    
+    erd: str = Field(default="", description="ERD summary + DBML")
+    architecture: str = Field(default="", description="Architecture document")
+    tech_stack: str = Field(default="", description="Tech stack document")
+    schema_sql: str = Field(default="", description="DDL schema SQL")
+
     def keys(self) -> list[str]:
         """Return document file names"""
         return [
             "api_spec.md",
             "erd.md",
-            "sequence.md",
             "architecture.md",
-            "dependencies.md",
-            "structure.md",
-            "state_machine.md"
+            "tech_stack.md",
+            "schema.sql",
         ]
-    
+
     def values(self) -> list[str]:
         """Return document contents"""
         return [
             self.api_spec,
             self.erd,
-            self.sequence,
             self.architecture,
-            self.dependencies,
-            self.structure,
-            self.state_machine
+            self.tech_stack,
+            self.schema_sql,
         ]
-    
+
     def __len__(self) -> int:
-        return 7
-    
-    def __iter__(self):
-        return iter(self.items())
+        return 5
+
+    def items(self) -> list[tuple[str, str]]:
         """Return document name-content pairs"""
         return list(zip(self.keys(), self.values()))
-    
-    def __iter__(self) -> tuple[str, str]:
+
+    def __iter__(self):
         return iter(self.items())
 
 
@@ -76,8 +69,8 @@ class MultiDocumentAnalysisOutput(BaseModel):
     @field_validator("document_count")
     @classmethod
     def validate_count(cls, v: int) -> int:
-        if v != 7:
-            raise ValueError(f"Expected 7 documents, got {v}")
+        if v != 5:
+            raise ValueError(f"Expected 5 documents, got {v}")
         return v
     
     @field_validator("expires_in_seconds")

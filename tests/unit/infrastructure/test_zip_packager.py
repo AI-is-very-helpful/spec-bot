@@ -32,24 +32,22 @@ class TestZIPPackagingService:
             assert "erd.md" in names
             assert "sequence.md" in names
     
-    def test_create_zip_all_7_documents(self) -> None:
-        """Test creating ZIP with all 7 documents"""
+    def test_create_zip_all_5_documents(self) -> None:
+        """Test creating ZIP with all 5 documents (5 agents)"""
         service = ZIPPackagingService()
         
         documents = {
             "api_spec.md": "# API Spec",
             "erd.md": "# ERD",
-            "sequence.md": "# Sequence",
             "architecture.md": "# Architecture",
-            "dependencies.md": "# Dependencies",
-            "structure.md": "# Structure",
-            "state_machine.md": "# State Machine",
+            "tech_stack.md": "# Tech Stack",
+            "schema.sql": "-- DDL",
         }
         
         zip_bytes = service.create_zip(documents)
         
         with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
-            assert len(zf.namelist()) == 7
+            assert len(zf.namelist()) == 5
     
     def test_create_zip_content_verification(self) -> None:
         """Test ZIP content is correct"""

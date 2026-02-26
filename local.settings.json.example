@@ -1,15 +1,8 @@
 {
   "IsEncrypted": false,
   "Values": {
-    "AzureWebJobsStorage": "",
     "FUNCTIONS_WORKER_RUNTIME": "python",
-    "AZURE_BOT_ID": "YOUR_BOT_APP_ID",
-    "AZURE_BOT_PASSWORD": "YOUR_BOT_APP_PASSWORD",
-    "OPENAI_API_KEY": "YOUR_AZURE_OPENAI_API_KEY",
-    "OPENAI_API_ENDPOINT": "https://YOUR_RESOURCE_NAME.openai.azure.com/",
-    "OPENAI_API_VERSION": "2024-02-15-preview",
-    "OPENAI_DEPLOYMENT_NAME": "gpt-4o",
-    "GITHUB_TOKEN": "YOUR_GITHUB_PAT (optional for public repos)"
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true"
   },
   "Host": {
     "LocalHttpPort": 7071,

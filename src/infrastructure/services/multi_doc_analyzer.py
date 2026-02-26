@@ -4,10 +4,9 @@ import json
 import logging
 from typing import Any
 
-from openai import AzureOpenAI
-
 from src.domain.entities.repository import RepositoryAnalysis
 from src.domain.interfaces.repositories import AIAnalyzer
+from src.infrastructure.services.aoai_client import build_aoai_client
 
 logger = logging.getLogger(__name__)
 
@@ -61,22 +60,21 @@ Return ONLY a JSON object (no additional text):
 
 
 class MultiDocumentAnalyzer:
-    """Azure OpenAI service for generating 7 technical documents"""
-    
+    """Azure OpenAI service for generating 7 technical documents (엔드포인트 형태에 따라 OpenAI/AzureOpenAI 사용)"""
+
     def __init__(
         self,
+        endpoint: str,
         api_key: str,
-        api_endpoint: str,
         api_version: str,
-        deployment_name: str,
+        deployment: str,
     ) -> None:
-        self._client = AzureOpenAI(
+        self._client, self._deployment_name = build_aoai_client(
+            endpoint=endpoint,
             api_key=api_key,
             api_version=api_version,
-            azure_endpoint=api_endpoint,
-            azure_deployment=deployment_name,
+            deployment=deployment,
         )
-        self._deployment_name = deployment_name
     
     def analyze(self, analysis: RepositoryAnalysis) -> dict[str, Any]:
         """Analyze repository and generate all 7 documents

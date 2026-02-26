@@ -1,407 +1,110 @@
-# Spec Bot 아키텍처 및 동작 흐름
+# Spec Bot — 아키텍처 문서
 
-## 1. 프로젝트 개요
+## 개요
 
-Spec Bot은 Microsoft Teams에서 GitHub 레포지토리 URL을 입력하면 AI가 자동으로 7가지 핵심 기술 문서를 생성하고 ZIP 파일로 다운로드 가능한 Teams 에이전트입니다.
+Spec Bot은 Teams에서 GitHub 레포 URL을 입력받아 Azure OpenAI로 소스코드를 분석해 **7가지 기술 문서**를 자동 생성하고, ZIP으로 패키징해 Blob Storage에 올린 뒤 SAS URL과 함께 Adaptive Card로 전달하는 Teams 봇입니다.
+진입부는 Azure Functions(HTTP / Bot 메시지)이며, 비즈니스 흐름은 Clean Architecture 레이어(도메인 · 애플리케이션 · 인프라)로 구성됩니다. **요청부터 응답까지 단계별 로직은 [LOGIC_FLOW.md](LOGIC_FLOW.md) 참고.**
 
-### 주요 기능
-- 7가지 기술 문서 자동 생성 (API Spec, ERD, Sequence, Architecture, Dependencies, Structure, State Machine)
-- ZIP 패키징 및 Azure Blob Storage 업로드
-- 24시간 유효 SAS URL 발급
-- Adaptive Card를 통한 결과 전송
+## 아키텍처 스타일
 
----
+**Clean Architecture + Hexagonal** — 프레젠테이션(HTTP/Bot)은 유스 케이스만 호출하고, 도메인은 인터페이스(포트)만 정의하며, GitHub·OpenAI·Blob·ZIP·Teams 등 외부 연동은 인프라 어댑터로 주입됩니다.
 
-## 2. 시스템 아키텍처
-
-### 2.1 기술 스택
-
-| 구성요소 | 기술 |
-|---------|------|
-| Interface | Microsoft Teams |
-| Bot Framework | Azure Bot Service |
-| Backend | Azure Functions (Python 3.11+) |
-| Storage | Azure Blob Storage |
-| AI | Azure OpenAI Service (kimi-k2.5) |
-| Validation | Pydantic |
-| Type Safety | mypy (strict mode) |
-| Architecture | Clean Architecture + Hexagonal Architecture |
-
-### 2.2 레이어드 아키텍처
+## 구성
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│              Presentation Layer (API)                    │
-│         HTTP Handler (Azure Functions Trigger)           │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-┌─────────────────────────▼───────────────────────────────┐
-│              Application Layer (Use Cases)               │
-│      MultiDocumentAnalysisUseCase, DTOs                 │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-┌─────────────────────────▼───────────────────────────────┐
-│                Domain Layer (Core)                       │
-│  Entities, Value Objects, Interfaces (Ports)           │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-┌─────────────────────────▼───────────────────────────────┐
-│            Infrastructure Layer (Adapters)               │
-│  GitHub, OpenAI, Blob Storage, Teams, ZIP Packager    │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│              Presentation Layer                      │
+│   function_app.py · http_handler · Bot /api/messages │
+└──────────┬────────────────────────────┬────────────┘
+           │                             │
+     ┌─────▼──────────────┐     ┌────────▼────────────┐
+     │ application/        │     │ domain/             │
+     │ dto/                │     │ entities/           │
+     │ use_cases/          │◄────│ value_objects/      │
+     │  analyze_repository │     │ interfaces/ (Ports)  │
+     │  multi_doc_analysis │     └────────┬────────────┘
+     └─────┬──────────────┘              │
+           │                             │
+     ┌─────▼─────────────────────────────▼────────────┐
+     │ infrastructure/                                │
+     │ repositories/github.py   · services/           │
+     │   openai · multi_doc_analyzer · mermaid        │
+     │   blob_storage · zip_packager · card · teams_bot│
+     └───────────────────────────────────────────────┘
 ```
 
----
+## 생성 문서별 파이프라인
 
-## 3. 프로젝트 구조
-
-```
-spec-bot/
-├── function_app.py                 # Azure Functions 엔트리 포인트
-│
-├── app/                            # 기존 구조 (레거시 호환)
-│   ├── main.py                     # Teams 메시지 핸들러
-│   ├── config.py                   # 설정 관리
-│   ├── services/
-│   │   ├── github.py               # GitHub 스크래핑
-│   │   ├── openai_service.py       # OpenAI 서비스
-│   │   ├── mermaid_renderer.py     # Mermaid 렌더링
-│   │   └── adaptive_card.py        # Adaptive Card 빌더
-│   └── models/
-│       └── schemas.py              # Pydantic 스키마
-│
-├── src/                            # Clean Architecture 핵심 코드
-│   ├── domain/                     # 도메인 레이어
-│   │   ├── entities/
-│   │   │   └── repository.py      # SourceFile, RepositoryAnalysis, RepositoryMetadata
-│   │   ├── value_objects/
-│   │   │   └── github.py           # GitHubURL, FilePath, SourceCode
-│   │   └── interfaces/
-│   │       └── repositories.py    # 포트 인터페이스 (GitHubRepository, AIAnalyzer, CardBuilder)
-│   │
-│   ├── application/                # 애플리케이션 레이어
-│   │   ├── dto/
-│   │   │   ├── repository.py       # 단일 문서 DTO
-│   │   │   └── multidoc.py         # 7문서 DTO (MultiDocumentAnalysisInput/Output)
-│   │   └── use_cases/
-│   │       ├── analyze_repository.py   # 단일 문서 UseCase
-│   │       └── multi_doc_analysis.py   # 7문서 UseCase
-│   │
-│   ├── infrastructure/             # 인프라스트럭처 레이어
-│   │   ├── repositories/
-│   │   │   └── github.py           # PyGitHubRepository 구현
-│   │   └── services/
-│   │       ├── openai.py           # AzureOpenAIService
-│   │       ├── multi_doc_analyzer.py   # 7문서 AI 분석
-│   │       ├── mermaid.py          # MermaidInkRenderer
-│   │       ├── card.py             # TeamsCardBuilder
-│   │       ├── blob_storage.py     # Azure Blob Storage
-│   │       ├── zip_packager.py     # ZIP 패키징
-│   │       ├── teams_bot.py        # Teams Bot Service
-│   │       └── logging_config.py  # 로깅 설정
-│   │
-│   └── presentation/               # 프레젠테이션 레이어
-│       └── handlers/
-│           └── http_handler.py      # Azure Functions HTTP Trigger
-│
-├── tests/                          # 테스트 (TDD)
-│   └── unit/
-│       ├── domain/                 # 도메인 테스트
-│       ├── application/            # 애플리케이션 테스트
-│       └── infrastructure/         # 인프라스트럭처 테스트
-│
-├── host.json                       # Azure Functions 설정
-├── requirements.txt                # Python 의존성
-├── mypy.ini                        # mypy 타입 검사 설정
-└── .env.example                    # 환경변수 예시
-```
-
----
-
-## 4. 데이터 흐름 (Data Flow)
-
-### 4.1 전체 흐름도
+전체 흐름은 동일한 5단계를 따릅니다:
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌─────────────────┐
-│   Teams     │────▶│ Azure Bot    │────▶│    Azure        │
-│   User      │     │  Service     │     │  Functions      │
-└─────────────┘     └──────────────┘     └────────┬────────┘
-                                                   │
-                    ┌──────────────────────────────▼─────────────────────────┐
-                    │              HTTP Handler (http_handler.py)           │
-                    │  1. Teams Activity 파싱                               │
-                    │  2. GitHub URL 추출                                  │
-                    │  3. Input Validation (Pydantic)                     │
-                    └──────────────────────────────┬────────────────────────┘
-                                                   │
-                    ┌───────────────────────────────▼────────────────────────┐
-                    │         MultiDocumentAnalysisUseCase                    │
-                    │  1. GitHubURL 파싱                                     │
-                    │  2. Repository 메타데이터 조회                          │
-                    │  3. 파일 트리 조회                                     │
-                    │  4. 핵심 소스 파일 조회                                 │
-                    │  5. RepositoryAnalysis 엔티티 생성                    │
-                    └──────────────────────────────┬────────────────────────┘
-                                                   │
-        ┌───────────────────────────────────────────┼───────────────────────────────┐
-        │                                           │                               │
-        ▼                                           ▼                               ▼
-┌───────────────┐                     ┌──────────────────┐               ┌─────────────────┐
-│   GitHub      │                     │  MultiDocument   │               │    Diagram      │
-│  Repository   │                     │    Analyzer      │               │   Renderer      │
-│ (Adapter)     │                     │  (AI Analysis)   │               │  (Mermaid)      │
-└───────┬───────┘                     └────────┬─────────┘               └─────────────────┘
-        │                                       │                                                 
-        │  fetch_metadata()                     │  analyze_multidoc()                              
-        │  fetch_file_tree()                   │  - project_summary                              
-        │  fetch_source_files()                │  - api_spec                                     
-        │                                       │  - erd, sequence, architecture                  
-        └───────────────────────────────────────┘  - dependencies, structure, state_machine    
-                                                   │                                                 
-                                                   ▼                                                 
-                    ┌──────────────────────────────────────────────────────┐
-                    │           ZIPPackagingService                       │
-                    │  - 7개 Markdown 파일을 ZIP으로 압축                 │
-                    └───────────────────────────────┬────────────────────┘
-                                                   │
-                    ┌───────────────────────────────▼─────────────────────┐
-                    │           AzureBlobStorageService                   │
-                    │  - ZIP 파일 업로드                                  │
-                    │  - SAS URL 생성 (24시간 유효)                      │
-                    └───────────────────────────────┬────────────────────┘
-                                                   │
-                    ┌───────────────────────────────▼─────────────────────┐
-                    │            TeamsCardBuilder                          │
-                    │  - 프로젝트 요약 + 다운로드 버튼 (Adaptive Card)    │
-                    └───────────────────────────────┬────────────────────┘
-                                                   │
-                                                   ▼
-                    ┌──────────────────────────────────────────────────────┐
-                    │               Teams Bot Service                      │
-                    │              (응답 메시지 전송)                       │
-                    └──────────────────────────────────────────────────────┘
+1. GitHub URL 수신        — Teams/Bot 또는 HTTP Body
+2. 레포 준비              — ai-agent `prepare_repo`로 zip 다운로드/로컬 경로 확보
+3. AI 분석 (ai-agent)     — 5개 에이전트(ERD, API, Arch, DDL, Stack)가 관련 파일만 스캔/분석해 7문서 생성
+4. ZIP 패키징 · Blob 업로드 — zip_packager → blob_storage, SAS URL 발급
+5. Adaptive Card 반환    — card_builder로 요약 + 다운로드 버튼
 ```
 
-### 4.2 상세 동작 단계
+### API Specification
+- 입력: 레포 소스 파일(Controller·라우트 등)
+- 출력: `api_spec.md` (OpenAPI 3.0 규격 Markdown)
 
-#### Step 1: 사용자 입력
-```
-Teams에서 "@Spec Bot https://github.com/owner/repo" 입력
-```
+### ERD
+- 입력: 엔티티·관계 관련 소스
+- 출력: `erd.md` (Mermaid erDiagram)
 
-#### Step 2: Azure Functions 트리거
-```
-function_app.py → messages HTTP Trigger
-```
+### Sequence Diagram
+- 입력: 비즈니스 로직·호출 흐름 관련 소스
+- 출력: `sequence.md` (Mermaid sequenceDiagram)
 
-#### Step 3: HTTP Handler 처리 (http_handler.py)
-1. Teams Activity 파싱
-2. 도움말 명령어 확인
-3. GitHub URL 추출 (정규식)
-4. 입력 검증 (Pydantic)
-5. ACK 메시지 생성
+### Architecture Diagram
+- 입력: 구조·설정·모듈 구분 관련 소스
+- 출력: `architecture.md` (Mermaid flowchart)
 
-#### Step 4: Use Case 실행 (MultiDocumentAnalysisUseCase)
+### Setup & Dependencies
+- 입력: 빌드 파일·의존성·외부 서비스 설정
+- 출력: `dependencies.md`
 
-**Step 4-1: Repository 데이터 수집**
-- `GitHubURL` 값 객체 생성
-- `github_repository.fetch_metadata()` - 메타데이터 조회
-- `github_repository.fetch_file_tree()` - 파일 트리 조회
-- `github_repository.fetch_source_files()` - 핵심 소스 파일 조회
-- `RepositoryAnalysis` 엔티티 생성
+### Project Structure
+- 입력: 파일 트리 + 선택 소스
+- 출력: `structure.md` (디렉터리 트리 + AI 주석)
 
-**Step 4-2: AI 분석**
-- `MultiDocumentAnalyzer.analyze_multidoc()` 호출
-- Azure OpenAI (kimi-k2.5)에게 7개 문서 생성 요청
-- System Prompt로 Mermaid 문법 강제
+### State Machine
+- 입력: 도메인 생명주기·상태 관련 소스
+- 출력: `state_machine.md` (Mermaid stateDiagram)
 
-**Step 4-3: ZIP 패키징**
-- 7개 Markdown 파일 생성:
-  - `api_spec.md`
-  - `erd.md`
-  - `sequence.md`
-  - `architecture.md`
-  - `dependencies.md`
-  - `structure.md`
-  - `state_machine.md`
-- `ZIPPackagingService.create_zip()` - 메모리 내 ZIP 압축
+## 공용 모듈 (도메인 · 애플리케이션 · 인프라)
 
-**Step 4-4: Blob Storage 업로드**
-- `AzureBlobStorageService.upload_zip()` - ZIP 파일 업로드
-- SAS 토큰 생성 (24시간 유효)
+| 모듈 | 역할 |
+|------|------|
+| `domain/entities/repository.py` | SourceFile, RepositoryAnalysis, RepositoryMetadata |
+| `domain/value_objects/github.py` | GitHubURL, FilePath, SourceCode |
+| `domain/interfaces/repositories.py` | GitHubRepository, AIAnalyzer, CardBuilder, DiagramRenderer 등 포트 |
+| `application/dto/repository.py` | 단일 문서 분석 입·출력 DTO |
+| `application/dto/multidoc.py` | 5문서 분석 입·출력 DTO (MultiDocumentAnalysisInput/Output) |
+| `application/use_cases/multi_doc_analysis.py` | 5문서 생성 유스 케이스 (fetch → AI → ZIP → Blob → Card) |
+| `infrastructure/repositories/github.py` | GitHub API/스크래핑 구현 (GitHubRepository 구현체) |
+| `infrastructure/services/openai.py` | Azure OpenAI 호출 (AIAnalyzer 구현체) |
+| `infrastructure/services/multi_doc_analyzer.py` | 7문서 일괄 AI 분석 (현재 미사용, ai-agent만 사용) |
+| `infrastructure/services/blob_storage.py` | Blob 업로드 및 SAS URL 발급 |
+| `infrastructure/services/zip_packager.py` | 5개 파일 ZIP 패키징 |
+| `infrastructure/services/card.py` | Teams Adaptive Card 빌드 (CardBuilder 구현체) |
+| `infrastructure/services/ai_agent_pipeline.py` | agents(erd/api/arch/ddl/stack) 실행 → 5 doc 반환 |
+| `src/agents/` | 포함된 ai-agent 패키지 (erd_agent, api_agent, arch_agent, ddl_agent, stack_agent) |
 
-**Step 4-5: Adaptive Card 생성**
-- `TeamsCardBuilder.build_download_card()` - 다운로드 버튼 포함 카드 생성
+## agents(ai-agent) 내부 로직 (기본)
 
-#### Step 5: Teams 응답
-```
-Adaptive Card (프로젝트 요약 + 다운로드 버튼) 전송
-```
+Azure Function·Teams 인터페이스는 동일하게 두고, **문서 생성 방식만** 프로젝트 내 포함된 agents로 바꿀 수 있다.
 
----
+- **동작**: GitHub URL → `prepare_repo`(zip 다운로드) → **src/agents** 아래 5개 에이전트(ERD, API, Arch, DDL, Stack) 실행 → 5개 문서만 반환 → ZIP·Blob·Card 동일.
+- **코드 위치**: ai-agent 코드는 **spec-bot 프로젝트에 포함** (`src/agents/`). 별도 ai-agent 프로젝트/경로 불필요.
+- **의존성**: requirements.txt에 javalang·rich 등 agents용 의존성 포함.
 
-## 5. 핵심 컴포넌트
+## 확장 방법
 
-### 5.1 도메인 레이어
+새 문서 유형을 추가하려면:
 
-#### Entities (src/domain/entities/repository.py)
-| Entity | 설명 |
-|--------|------|
-| `SourceFile` | 소스 파일 (path, content, FileType) |
-| `RepositoryMetadata` | 레포지토리 메타데이터 (owner, name, language, description) |
-| `RepositoryAnalysis` | 분석 결과 Aggregate Root |
-| `ProjectSummary` | 프로젝트 요약 값 객체 |
-| `APIEndpoint` | API 엔드포인트 값 객체 |
-
-#### Value Objects (src/domain/value_objects/github.py)
-| Value Object | 설명 |
-|--------------|------|
-| `GitHubURL` | GitHub URL 값 객체 (검증 로직 포함) |
-| `FilePath` | 파일 경로 값 객체 |
-| `SourceCode` | 소스 코드 값 객체 |
-
-#### Interfaces (Ports) (src/domain/interfaces/repositories.py)
-| Interface | 설명 |
-|-----------|------|
-| `GitHubRepository` | GitHub 데이터 조회 포트 |
-| `AIAnalyzer` | AI 분석 포트 |
-| `DiagramRenderer` | 다이어그램 렌더링 포트 |
-| `CardBuilder` | Adaptive Card 빌더 포트 |
-
-### 5.2 애플리케이션 레이어
-
-#### DTOs (src/application/dto/multidoc.py)
-| DTO | 설명 |
-|-----|------|
-| `MultiDocumentAnalysisInput` | 입력 DTO (github_url 검증) |
-| `MultiDocumentAnalysisOutput` | 출력 DTO (zip_blob_url, summary, document_count) |
-
-#### Use Cases (src/application/use_cases/multi_doc_analysis.py)
-| Use Case | 설명 |
-|----------|------|
-| `MultiDocumentAnalysisUseCase` | 7개 문서 분석 및 ZIP 생성 유스 케이스 |
-
-### 5.3 인프라스트럭처 레이어
-
-#### Adapters (src/infrastructure/)
-| Adapter | 설명 |
-|---------|------|
-| `PyGitHubRepository` | GitHub API Adapter (PyGithub) |
-| `AzureOpenAIService` | Azure OpenAI Adapter |
-| `MultiDocumentAnalyzer` | 7문서 AI 분석기 |
-| `MermaidInkRenderer` | Mermaid 이미지 렌더러 |
-| `TeamsCardBuilder` | Teams Adaptive Card 빌더 |
-| `AzureBlobStorageService` | Azure Blob Storage Adapter |
-| `ZIPPackagingService` | ZIP 파일 패키저 |
-| `TeamsBotService` | Teams Bot 메시지 서비스 |
-
----
-
-## 6. 환경 설정
-
-### 필수 환경 변수
-
-```bash
-# Azure Bot Configuration
-AZURE_BOT_ID=your_bot_app_id
-AZURE_BOT_PASSWORD=your_bot_password
-
-# Azure OpenAI Configuration
-OPENAI_API_KEY=your_azure_openai_api_key
-OPENAI_API_ENDPOINT=https://your-resource-name.openai.azure.com/
-OPENAI_API_VERSION=2024-02-15-preview
-OPENAI_DEPLOYMENT_NAME=kimi-k2.5
-
-# Azure Blob Storage Configuration
-AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;...
-
-# GitHub (optional - public repos don't need token)
-GITHUB_TOKEN=your_github_pat
-```
-
----
-
-## 7. 생성되는 문서
-
-| 파일 | 설명 | Mermaid 포함 |
-|------|------|-------------|
-| `api_spec.md` | OpenAPI 3.0 규격 API 명세 | - |
-| `erd.md` | 엔티티 관계 다이어그램 | erDiagram |
-| `sequence.md` | 비즈니스 로직 플로우 | sequenceDiagram |
-| `architecture.md` | 계층/모듈 구조 | flowchart |
-| `dependencies.md` | 빌드 도구, 외부 서비스, 라이브러리 | - |
-| `structure.md` | 디렉토리 트리 + AI 주석 | - |
-| `state_machine.md` | 도메인 상태 전이도 | stateDiagram-v2 |
-
----
-
-## 8. Azure 배포 아키텍처
-
-```
-┌─────────────────┐
-│   Microsoft     │
-│    Teams        │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Azure Bot      │
-│   Service       │
-└────────┬────────┘
-         │ (HTTPS Webhook)
-         ▼
-┌─────────────────┐     ┌──────────────────┐
-│    Azure        │────▶│    Azure         │
-│  Functions      │     │  Blob Storage    │
-│  (Python)       │     │  (ZIP files)     │
-└─────────────────┘     └──────────────────┘
-         │
-         ▼
-┌─────────────────┐
-│   Azure         │
-│   OpenAI        │
-│ (kimi-k2.5)     │
-└─────────────────┘
-```
-
----
-
-## 9. 테스트 전략
-
-테스트는 TDD(테스트 주도 개발) 방식으로 구성됩니다:
-
-```
-tests/
-└── unit/
-    ├── domain/           # 도메인 엔티티 및 값 객체 테스트
-    │   └── test_repository.py
-    ├── application/      # Use Case 및 DTO 테스트
-    │   └── test_multi_doc_analysis.py
-    └── infrastructure/   # Adapter 테스트
-        ├── test_github.py
-        └── test_blob_storage.py
-```
-
-### 테스트 실행
-```bash
-pytest tests/ -v
-pytest tests/unit/domain/ -v
-pytest tests/unit/application/ -v
-pytest tests/unit/infrastructure/ -v
-```
-
-### 타입 검사
-```bash
-mypy src/
-mypy src/ --strict
-```
-
----
-
-## 10. 보안 고려사항
-
-1. **SAS URL 만료**: 24시간 후 자동 만 **Blob Lifecycle**:료
-2. 불필요한 파일 자동 삭제 정책 적용
-3. **소스 코드 미저장**: 분석 후 소스 코드 외부 저장소 미보관
-4. **Private Repo**: GitHub PAT 사용 시 보안 채널 통해 입력
+1. `application/dto/multidoc.py`에 새 문서 파일명을 `DOCUMENT_FILES` 등에 추가
+2. `src/agents/`에 새 에이전트를 추가하거나, 기존 에이전트 산출물을 확장
+3. 필요 시 `domain/interfaces/repositories.py`에 전용 포트를 두고, 인프라에서 구현
+4. ZIP 패키징 시 새 파일이 포함되도록 `zip_packager` 로직 반영
