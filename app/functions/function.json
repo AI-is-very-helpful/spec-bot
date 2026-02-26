@@ -1,0 +1,19 @@
+{
+  "scriptFile": "../src/presentation/handlers/http_handler.py",
+  "entryPoint": "main",
+  "bindings": [
+    {
+      "authLevel": "function",
+      "type": "httpTrigger",
+      "direction": "in",
+      "name": "req",
+      "methods": ["post"],
+      "route": "messages"
+    },
+    {
+      "type": "http",
+      "direction": "out",
+      "name": "$return"
+    }
+  ]
+}

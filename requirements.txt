@@ -1,0 +1,30 @@
+# Azure Functions
+azure-functions
+azure-storage-blob
+pyyaml
+
+# Bot Framework
+botbuilder-core
+botbuilder-schema
+botframework-connector
+
+# HTTP & JSON
+requests
+aiohttp
+python-dotenv
+
+# OpenAI & Pydantic
+openai
+pydantic
+pydantic-settings
+
+# GitHub API
+PyGithub
+
+# Logging
+python-json-logger
+
+# Testing
+pytest
+pytest-mock
+pytest-cov
